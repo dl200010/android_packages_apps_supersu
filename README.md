@@ -12,4 +12,9 @@ Stable: http://download.chainfire.eu/supersu-stable
 Beta: http://download.chainfire.eu/supersu-beta
 Latest: http://download.chainfire.eu/supersu
 
+Must add this to system/core/root/init.d above bootanimation
 
+
+service initd /system/bin/initd.sh
+    class main
+    oneshot

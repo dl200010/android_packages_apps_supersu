@@ -12,9 +12,8 @@ Stable: http://download.chainfire.eu/supersu-stable
 Beta: http://download.chainfire.eu/supersu-beta
 Latest: http://download.chainfire.eu/supersu
 
-Must add this to system/core/root/init.d above bootanimation
-
-
+Must delete folder system/extras/su
+Must add this to init.(DEVICE).rc in device/manufacter/device:
 service initd /system/bin/initd.sh
     class main
     oneshot

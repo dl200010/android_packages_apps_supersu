@@ -81,7 +81,13 @@ include $(BUILD_PREBUILT)
 
 endif
 
-
+#SYMLINKS := $(addprefix $(PRODUCT_OUT)/system/bin/,install-recovery.sh)
+#$(SYMLINKS):
+#	@echo "Symlink: $@ -> /system/etc/install-recovery.sh"
+#	$(hide) ln -sf /system/etc/install-recovery.sh $@
+#ALL_DEFAULT_INSTALLED_MODULES += $(SYMLINKS)
+#ALL_MODULES.$(LOCAL_MODULE).INSTALLED := \
+#    $(ALL_MODULES.$(LOCAL_MODULE).INSTALLED) $(SYMLINKS)
 
 
 

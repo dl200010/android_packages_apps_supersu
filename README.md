@@ -1,5 +1,4 @@
 This will install Busybox for init.d script support and SuperSU for root.
-This does not use "install-recovery.sh" in any way, but they are included if you want to go that way
 Currently this only supports arm64 since I only have that.
 Once I pull out the other phone I have to test arm, then that will be added.
 
@@ -11,20 +10,19 @@ Instructions:
 
 Use "PRODUCT_PACKAGES += SuperSU" in device make file (i.e. aosp_angler.mk)
 
-Use the example Busybox/android_filesystem_config.h to give the directories proper permissions when building/creating img files.
+Use the example android_filesystem_config_h to give the directories and files proper permissions when building/creating img files.
+Add to android_filesystem_config.h in your device directory.
 
-Must delete folder "system/extras/su" from standard AOSP tree
+Must delete folder "system/extras/su" from AOSP tree
 
-Must add this to init.(DEVICE).rc in device/(MANUFACTURER)/(DEVICE) OR system/core/rootdir/init.rc:
+Must add this to init.(DEVICE).rc or init.rc:
 #------------------------------------------------------------------#
-service initd /system/bin/logwrapper /system/xbin/busybox run-parts /system/etc/init.d/
+service run_root /system/etc/install-root.sh
     class main
-    user root
-    group root
     oneshot
 #------------------------------------------------------------------#
 
-
+You may be asked to update the SU binary once booted to android, do it.
 
 
 
@@ -42,7 +40,7 @@ XDA Thread
 http://forum.xda-developers.com/showthread.php?t=1538053
 
 Google Play free SuperSU: https://play.google.com/store/apps/details?id=eu.chainfire.supersu&hl=en
-Google Play paid SuperSU Pro: https://play.google.com/store/apps/details?id=eu.chainfire.supersu.pro&hl=en
+Google Play paid SuperSU Pro (Still need free version, this is just a license): https://play.google.com/store/apps/details?id=eu.chainfire.supersu.pro&hl=en
 
 Update Links
 TWRP / FlashFire installable ZIP:

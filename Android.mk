@@ -8,7 +8,7 @@ LOCAL_SRC_FILES := SuperSU/common/Superuser.apk
 LOCAL_PACKAGE_NAME := $(LOCAL_MODULE)
 LOCAL_MODULE_CLASS := APPS
 LOCAL_MODULE_SUFFIX := $(COMMON_ANDROID_PACKAGE_SUFFIX)
-LOCAL_REQUIRED_MODULES := su .su daemonsu libsupol.so supolicy .installed_su_daemon busybox 99SuperSUDaemon
+LOCAL_REQUIRED_MODULES := su .su daemonsu libsupol.so supolicy .installed_su_daemon busybox install-root.sh install-recovery-2.sh
 include $(BUILD_PREBUILT)
 
 include $(CLEAR_VARS)
@@ -20,28 +20,29 @@ LOCAL_MODULE_PATH := $(PRODUCT_OUT)/system/etc
 include $(BUILD_PREBUILT)
 
 include $(CLEAR_VARS)
-LOCAL_MODULE := 99SuperSUDaemon
-LOCAL_SRC_FILES := SuperSU/common/99SuperSUDaemon
-LOCAL_MODULE_TAGS := optional
-LOCAL_MODULE_CLASS := EXECUTABLES
-LOCAL_MODULE_PATH := $(PRODUCT_OUT)/system/etc/init.d
-include $(BUILD_PREBUILT)
-
-include $(CLEAR_VARS)
 LOCAL_MODULE := busybox
 LOCAL_SRC_FILES := Busybox/busybox
 LOCAL_MODULE_TAGS := optional
 LOCAL_MODULE_CLASS := EXECUTABLES
 LOCAL_MODULE_PATH := $(PRODUCT_OUT)/system/xbin
+$(shell (mkdir -p $(PRODUCT_OUT)/system/etc/init.d >&2))
 include $(BUILD_PREBUILT)
 
-#include $(CLEAR_VARS)
-#LOCAL_MODULE := install-recovery.sh
-#LOCAL_SRC_FILES := Busybox/install-recovery.sh
-#LOCAL_MODULE_TAGS := optional
-#LOCAL_MODULE_CLASS := EXECUTABLES
-#LOCAL_MODULE_PATH := $(PRODUCT_OUT)/system/bin
-#include $(BUILD_PREBUILT)
+include $(CLEAR_VARS)
+LOCAL_MODULE := install-root.sh
+LOCAL_SRC_FILES := SuperSU/common/install-root.sh
+LOCAL_MODULE_TAGS := optional
+LOCAL_MODULE_CLASS := EXECUTABLES
+LOCAL_MODULE_PATH := $(PRODUCT_OUT)/system/etc
+include $(BUILD_PREBUILT)
+
+include $(CLEAR_VARS)
+LOCAL_MODULE := install-recovery-2.sh
+LOCAL_SRC_FILES := Busybox/install-recovery.sh
+LOCAL_MODULE_TAGS := optional
+LOCAL_MODULE_CLASS := EXECUTABLES
+LOCAL_MODULE_PATH := $(PRODUCT_OUT)/system/etc
+include $(BUILD_PREBUILT)
 
 ifeq ($(TARGET_ARCH),arm64)
 

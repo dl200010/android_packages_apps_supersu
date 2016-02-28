@@ -15,10 +15,11 @@ Add to android_filesystem_config.h in your device directory.
 
 Must delete folder "system/extras/su" from AOSP tree
 
-Must add this to init.(DEVICE).rc or init.rc:
+Must add this to init.rc:
 #------------------------------------------------------------------#
-service run_root /system/etc/install-root.sh
+service run_root /system/etc/install-busybox.sh
     class main
+    user root
     oneshot
 #------------------------------------------------------------------#
 
@@ -31,7 +32,7 @@ If you like this, than please buy SuperSU Pro and BusyBox Pro! I did.
 
 
 
-SuperUS Free by Chainfire
+SuperSU Free by Chainfire (2.65)
 #------------------------------------------------------------------#
 XDA Profile
 http://forum.xda-developers.com/member.php?u=631273
@@ -50,7 +51,7 @@ Latest: http://download.chainfire.eu/supersu
 #------------------------------------------------------------------#
 
 
-Busybox compiled by Stericson
+Busybox compiled by Stericson (1.24.1)
 #------------------------------------------------------------------#
 XDA Profile
 http://forum.xda-developers.com/member.php?u=1335872
@@ -58,7 +59,7 @@ http://forum.xda-developers.com/member.php?u=1335872
 Google Play free BusyBox: https://play.google.com/store/apps/details?id=stericson.busybox&hl=en
 Google Play paid BusyBox Pro: https://play.google.com/store/apps/details?id=stericson.busybox.donate&hl=en
 
-Featured on the BusyBox website at:http://busybox.net/products.html
+Featured on the BusyBox website at: http://busybox.net/products.html
 The BusyBox source code can be found here: http://git.busybox.net/busybox/
 #------------------------------------------------------------------#
 

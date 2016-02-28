@@ -1,5 +1,6 @@
 LOCAL_PATH := $(call my-dir)
 
+#The app to control Superuser access
 include $(CLEAR_VARS)
 LOCAL_MODULE_TAGS := optional
 LOCAL_MODULE := SuperSU
@@ -8,9 +9,10 @@ LOCAL_SRC_FILES := SuperSU/common/Superuser.apk
 LOCAL_PACKAGE_NAME := $(LOCAL_MODULE)
 LOCAL_MODULE_CLASS := APPS
 LOCAL_MODULE_SUFFIX := $(COMMON_ANDROID_PACKAGE_SUFFIX)
-LOCAL_REQUIRED_MODULES := su .su daemonsu libsupol.so supolicy .installed_su_daemon busybox install-root.sh install-recovery-2.sh
+LOCAL_REQUIRED_MODULES := su .su daemonsu libsupol.so supolicy .installed_su_daemon 99SuperSUDaemon
 include $(BUILD_PREBUILT)
 
+#File used to tell TWRP that root is installed
 include $(CLEAR_VARS)
 LOCAL_MODULE := .installed_su_daemon
 LOCAL_MODULE_TAGS := optional
@@ -19,31 +21,36 @@ LOCAL_SRC_FILES := SuperSU/common/.installed_su_daemon
 LOCAL_MODULE_PATH := $(PRODUCT_OUT)/system/etc
 include $(BUILD_PREBUILT)
 
+#init.d script used to launch Superuser daemon
+include $(CLEAR_VARS)
+LOCAL_MODULE := 99SuperSUDaemon
+LOCAL_SRC_FILES := SuperSU/common/99SuperSUDaemon
+LOCAL_MODULE_TAGS := optional
+LOCAL_MODULE_CLASS := EXECUTABLES
+LOCAL_MODULE_PATH := $(PRODUCT_OUT)/system/etc/init.d
+LOCAL_REQUIRED_MODULES := busybox
+include $(BUILD_PREBUILT)
+
+#busybox used to enable init.d support
 include $(CLEAR_VARS)
 LOCAL_MODULE := busybox
 LOCAL_SRC_FILES := Busybox/busybox
 LOCAL_MODULE_TAGS := optional
 LOCAL_MODULE_CLASS := EXECUTABLES
 LOCAL_MODULE_PATH := $(PRODUCT_OUT)/system/xbin
-$(shell (mkdir -p $(PRODUCT_OUT)/system/etc/init.d >&2))
+LOCAL_REQUIRED_MODULES := install-busybox.sh
 include $(BUILD_PREBUILT)
 
+#script called from init.rc to execute the /system/etc/init.d scripts
 include $(CLEAR_VARS)
-LOCAL_MODULE := install-root.sh
-LOCAL_SRC_FILES := SuperSU/common/install-root.sh
-LOCAL_MODULE_TAGS := optional
-LOCAL_MODULE_CLASS := EXECUTABLES
-LOCAL_MODULE_PATH := $(PRODUCT_OUT)/system/etc
-include $(BUILD_PREBUILT)
-
-include $(CLEAR_VARS)
-LOCAL_MODULE := install-recovery-2.sh
+LOCAL_MODULE := install-busybox.sh
 LOCAL_SRC_FILES := Busybox/install-recovery.sh
 LOCAL_MODULE_TAGS := optional
 LOCAL_MODULE_CLASS := EXECUTABLES
 LOCAL_MODULE_PATH := $(PRODUCT_OUT)/system/etc
 include $(BUILD_PREBUILT)
 
+#arm64 files superuser access
 ifeq ($(TARGET_ARCH),arm64)
 
 include $(CLEAR_VARS)

@@ -41,8 +41,7 @@ static const struct fs_path_config android_device_dirs[] = {
 */
 static const struct fs_path_config android_device_files[] = {
     /* for init.d support and root */
-    { 00755, AID_ROOT,      AID_ROOT,      0, "system/etc/install-root.sh" },
-    { 00755, AID_ROOT,      AID_ROOT,      0, "system/etc/install-recovery-2.sh" },
+    { 00755, AID_ROOT,      AID_ROOT,      0, "system/etc/install-busybox.sh" },
     { 00644, AID_ROOT,      AID_ROOT,      0, "system/etc/.installed_su_daemon" },
     { 00755, AID_ROOT,      AID_SHELL,     0, "system/bin/.ext/.su" },
     { 00755, AID_ROOT,      AID_SHELL,     0, "system/xbin/su" },

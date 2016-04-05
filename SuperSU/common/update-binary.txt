@@ -1,7 +1,7 @@
 #!/sbin/sh
 #
 # SuperSU installer ZIP
-# Copyright (c) 2012-2015 - Chainfire
+# Copyright (c) 2012-2016 - Chainfire
 #
 # ----- GENERIC INFO ------
 #
@@ -45,9 +45,7 @@
 #   STOCKBOOTIMAGE - Stock boot image location (PATCHBOOTIMAGE only)
 #   BINDSYSTEMXBIN - Poor man's overlay on /system/xbin (true/false,
 #                    SYSTEMLESS only)
-#   FSTABSYSTEMRW - Set /system, /vendor and /oem to read/write in
-#                   fstab. On some devices, this fixes /system not
-#                   being remountable read/write from Android.
+#   PERMISSIVE - Set sepolicy to fake-permissive (PATCHBOOTIMAGE only)
 # Shell overrides all, /data/.supersu overrides /system/.supersu
 #
 # Note that if SELinux is set to enforcing, the daemonsu binary expects
@@ -160,7 +158,7 @@
 # *1: su.pie for 17+ x86(_32) only
 #
 # 22+   ARCH/supolicy                 /su/bin/supolicy_wrapped            0755    u:object_r:system_file:s0   required
-# 22+   /su/bin/su (symlink) *2       /su/lib/supolicy                    0755    u:object_r:system_file:s0   required
+# 22+   /su/bin/su (symlink) *2       /su/bin/supolicy                    0755    u:object_r:system_file:s0   required
 # 22+   ARCH/libsupol.so              /su/lib/libsupol.so                 0644    u:object_r:system_file:s0   required
 # *2: when called this way, su sets the correct LD_LIBRARY_PATH and calls supolicy_wrapped
 #
@@ -178,12 +176,13 @@
 #
 # - Uses the supolicy tool to patch the sepolicy file
 # - Injects /sbin/launch_daemon.sh
+# - Creates /su
 # - Removes /verity_key
 # - Patches /*fstab*
 # --- Removes support_scfs and verify flags
-# --- Changes forceencrypt into encryptable
+# --- Changes forceencrypt/forcefdeorfbe into encryptable
+# --- Set ro mounts to use noatime
 # - Patches /init.rc
-# --- Adds mkdir /su
 # --- Adds a sukernel.mount property trigger that mounts /data/su.img to /su
 # --- Adds the daemonsu service that launches /sbin/launch_daemon.sh
 # --- Adds a SuperSU:PATCH marker with the version of the sukernel tool
@@ -191,7 +190,7 @@
 # - Patches /init.environ.rc
 # --- Adds PATH variable if it does not exist
 # --- Prepends /su/bin to the PATH variable
-# - Patches /file_contexts
+# - Patches /file_contexts[.bin]
 # --- Adds a default context for file existing in the /su mount
 #
 # In case this documentation becomes outdated, please note that the sukernel
@@ -205,6 +204,10 @@
 #
 # The boot image patcher currently only supports GZIP compressed ramdisks, and
 # boot images in the standard Android boot image format.
+#
+# During boot image patch, /data/custom_ramdisk_patch.sh will be called,
+# with the name of the ramdisk cpio file as parameter. The script must
+# replace the input file and return a 0 exit code.
 #
 # Just before flashing, the boot image patcher will call
 # /data/custom_boot_image_patch.sh with the name of the patched boot image
@@ -228,36 +231,29 @@ getvar() {
   eval $VARNAME=\$VALUE
 }
 
-if [ -z "$NOOVERRIDE" ]; then
-  # read override variables
-  getvar SYSTEMLESS
-  getvar PATCHBOOTIMAGE
-  getvar BOOTIMAGE
-  getvar STOCKBOOTIMAGE
-  getvar BINDSYSTEMXBIN
-  getvar FSTABSYSTEMRW
-fi
+readlink /proc/$$/fd/$OUTFD 2>/dev/null | grep /tmp >/dev/null
+if [ "$?" -eq "0" ]; then
+  # rerouted to log file, we don't want our ui_print commands going there
+  OUTFD=0
 
-if [ -z "$SYSTEMLESS" ]; then
-  # detect if we need systemless, based on Android version and boot image
-  SYSTEMLESS=detect
-fi
-if [ -z "$PATCHBOOTIMAGE" ]; then
-  # only if we end up doing a system-less install
-  PATCHBOOTIMAGE=true
-fi
-if [ -z "$BINDSYSTEMXBIN" ]; then
-  # causes launch_daemonsu to bind over /system/xbin
-  BINDSYSTEMXBIN=true
-fi
-if [ -z "$FSTABSYSTEMRW" ]; then
-  # system-less only, changes ro to rw in fstab
-  FSTABSYSTEMRW=false
+  # we are probably running in embedded mode, see if we can find the right fd
+  # we know the fd is a pipe and that the parent updater may have been started as
+  # 'update-binary 3 fd zipfile'
+  for FD in `ls /proc/$$/fd`; do
+    readlink /proc/$$/fd/$FD 2>/dev/null | grep pipe >/dev/null
+    if [ "$?" -eq "0" ]; then
+      ps | grep " 3 $FD " | grep -v grep >/dev/null
+      if [ "$?" -eq "0" ]; then
+        OUTFD=$FD
+        break
+      fi
+    fi
+  done
 fi
 
 ui_print() {
-  echo -n -e "ui_print $1\n" > /proc/self/fd/$OUTFD
-  echo -n -e "ui_print\n" > /proc/self/fd/$OUTFD
+  echo -n -e "ui_print $1\n" >> /proc/self/fd/$OUTFD
+  echo -n -e "ui_print\n" >> /proc/self/fd/$OUTFD
 }
 
 ch_con() {
@@ -361,6 +357,21 @@ remount_system_rw() {
   if (! is_mounted /system rw); then mount -o rw,remount /system; fi
   if (! is_mounted /system rw); then mount -o rw,remount /system /system; fi
   if (! is_mounted /system rw); then toolbox_mount /system; fi
+}
+
+# 'readlink -f' is not reliable across devices/recoveries, this works for our case
+resolve_link() {
+  local RESOLVE=$1
+  local RESOLVED=
+  while (true); do
+    RESOLVED=$(readlink $RESOLVE || echo $RESOLVE)
+    if [ "$RESOLVE" = "$RESOLVED" ]; then
+      echo $RESOLVE
+      break
+    else
+      RESOLVE=$RESOLVED
+    fi
+  done
 }
 
 wipe_system_files_if_present() {
@@ -567,10 +578,6 @@ find_boot_image() {
 # - sepolicy has init load_policy or permissive init
 # It symlink/patches the relevant files to /data, and sets SYSTEMLESS variable if not already set
 detect_systemless_required() {
-  # execute binaries from ramdisk
-  chmod 0755 $BIN/*
-  RAMDISKLIB=$BIN:$SYSTEMLIB
-
   OLD_SYSTEMLESS=$SYSTEMLESS
   if [ "$OLD_SYSTEMLESS" = "detect" ]; then
     # we don't override a pre-set true/false value
@@ -661,7 +668,7 @@ detect_systemless_required() {
   LD_LIBRARY_PATH=$RAMDISKLIB $BIN/supolicy --file /sutmp/sepolicy /data/security/current/sepolicy
   set_perm 1000 1000 0644 /data/security/current/sepolicy u:object_r:security_file:s0
 
-  for i in seapp_contexts file_contexts property_contexts service_contexts selinux_version; do
+  for i in seapp_contexts file_contexts file_contexts.bin property_contexts service_contexts selinux_version; do
     ln -s /$i /data/security/current/$i
   done
 
@@ -696,6 +703,32 @@ if [ -z "$BIN" ]; then
   fi
 fi
 
+if [ -z "$NOOVERRIDE" ]; then
+  # read override variables
+  getvar SYSTEMLESS
+  getvar PATCHBOOTIMAGE
+  getvar BOOTIMAGE
+  getvar STOCKBOOTIMAGE
+  getvar BINDSYSTEMXBIN
+  getvar PERMISSIVE
+fi
+if [ -z "$SYSTEMLESS" ]; then
+  # detect if we need systemless, based on Android version and boot image
+  SYSTEMLESS=detect
+fi
+if [ -z "$PATCHBOOTIMAGE" ]; then
+  # only if we end up doing a system-less install
+  PATCHBOOTIMAGE=true
+fi
+if [ -z "$BINDSYSTEMXBIN" ]; then
+  # causes launch_daemonsu to bind over /system/xbin, disabled by default
+  BINDSYSTEMXBIN=false
+fi
+if [ -z "$PERMISSIVE" ]; then
+  # don't make everything fake-permissive
+  PERMISSIVE=false
+fi
+
 API=$(cat /system/build.prop | grep "ro.build.version.sdk=" | dd bs=1 skip=21 count=2)
 ABI=$(cat /system/build.prop /default.prop | grep -m 1 "ro.product.cpu.abi=" | dd bs=1 skip=19 count=3)
 ABILONG=$(cat /system/build.prop /default.prop | grep -m 1 "ro.product.cpu.abi=" | dd bs=1 skip=19)
@@ -713,6 +746,7 @@ APKNAME=/system/app/Superuser.apk
 APPPROCESS=false
 APPPROCESS64=false
 SYSTEMLIB=/system/lib
+RAMDISKLIB=$SYSTEMLIB
 RWSYSTEM=true
 
 if [ "$API" -le "21" ]; then
@@ -778,8 +812,22 @@ if [ -z "$BIN" ]; then
   COM=/tmp/supersu/common
 fi
 
+# execute binaries from ramdisk
+chmod 0755 $BIN/*
+RAMDISKLIB=$BIN:$SYSTEMLIB
+
+if [ "$API" -ge "19" ]; then
+  # 4.4+: permissive all teh things
+  LD_LIBRARY_PATH=$RAMDISKLIB $BIN/supolicy --live "permissive *"
+fi
+
 SAMSUNG=false
 if [ "$API" -eq "$API" ]; then
+  SAMSUNG_CHECK=$(cat /system/build.prop | grep "ro.build.fingerprint=" | grep -i "samsung")
+  if [ $? -eq 0 ]; then
+    SAMSUNG=true
+  fi
+
   if [ "$API" -ge "23" ]; then
     # 6.0+
     ui_print "- Detecting system compatibility"
@@ -795,9 +843,7 @@ if [ "$API" -eq "$API" ]; then
 
     # 5.1/Samsung
     if ($SYSTEMLESS); then
-      SAMSUNG_CHECK=$(cat /system/build.prop | grep "ro.build.fingerprint=" | grep -i "samsung")
-      if [ $? -eq 0 ]; then
-        SAMSUNG=true
+      if ($SAMSUNG); then
         RWSYSTEM=false
       fi
     fi
@@ -1000,17 +1046,42 @@ else
   if [ ! -f "$SUIMG" ]; then
     LD_LIBRARY_PATH=$SYSTEMLIB /system/bin/make_ext4fs -l $SUIMGSIZE -a /su -S $COM/file_contexts_image $SUIMG
   fi
+  if [ -f "$SUIMG" ]; then
+    LD_LIBRARY_PATH=$SYSTEMLIB /system/bin/e2fsck -p $SUIMG
+  fi
 
   ui_print "- Mounting image"
 
   mkdir /su
-  losetup /dev/block/loop0 $SUIMG
-  mount -t ext4 -o loop /dev/block/loop0 /su
+
+  # 'losetup -f' is unreliable across devices/recoveries
+  LOOPDEVICE=
+  for LOOP in 0 1 2 3 4 5 6 7; do
+    if (! is_mounted /su); then
+      LOOPDEVICE=/dev/block/loop$LOOP
+      if [ ! -f "$LOOPDEVICE" ]; then
+        mknod $LOOPDEVICE b 7 $LOOP
+      fi
+      losetup $LOOPDEVICE $SUIMG
+      if [ "$?" -eq "0" ]; then
+        mount -t ext4 -o loop $LOOPDEVICE /su
+        if (! is_mounted /su); then
+          /system/bin/toolbox mount -t ext4 -o loop $LOOPDEVICE /su
+        fi
+        if (! is_mounted /su); then
+          /system/bin/toybox mount -t ext4 -o loop $LOOPDEVICE /su
+        fi
+      fi
+      if (is_mounted /su); then
+        break;
+      fi
+    fi
+  done
 
   ui_print "- Creating paths"
 
   mkdir /su/bin
-  set_perm 0 0 0755 /su/bin
+  set_perm 0 0 0751 /su/bin
   mkdir /su/xbin
   set_perm 0 0 0755 /su/xbin
   mkdir /su/lib
@@ -1056,6 +1127,11 @@ else
     rm -rf /data/security/*
   else
     cp_perm 1000 1000 0600 $COM/Superuser.apk /cache/SuperSU.apk
+  fi
+
+  # Fix Samsung deep sleep issue. Affects enough millions of users to include.
+  if ($SAMSUNG); then
+    cp_perm 0 0 0700 $COM/000000deepsleep /su/su.d/000000deepsleep
   fi
 
   if ($BINDSYSTEMXBIN); then
@@ -1131,7 +1207,11 @@ else
       check_zero_def "" "LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --cpio-extract /sutmp/ramdisk sepolicy /sutmp/sepolicy"
 
       if ($CONTINUE); then
-        LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/supolicy --file /sutmp/sepolicy /sutmp/sepolicy_patched
+        if ($PERMISSIVE); then
+          LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/supolicy --file /sutmp/sepolicy /sutmp/sepolicy_patched "permissive *"
+        else
+          LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/supolicy --file /sutmp/sepolicy /sutmp/sepolicy_patched
+        fi
         if [ ! -f "/sutmp/sepolicy_patched" ]; then
           ui_print "--- Failure, aborting"
           CONTINUE=false
@@ -1141,30 +1221,25 @@ else
       check_zero_def "" "LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --cpio-add /sutmp/ramdisk /sutmp/ramdisk 644 sepolicy /sutmp/sepolicy_patched"
     fi
 
-    check_zero_def "- Patching daemon launcher" "LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --cpio-add /sutmp/ramdisk /sutmp/ramdisk 700 sbin/launch_daemonsu.sh $COM/launch_daemonsu.sh"
+    check_zero_def "- Adding daemon launcher" "LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --cpio-add /sutmp/ramdisk /sutmp/ramdisk 700 sbin/launch_daemonsu.sh $COM/launch_daemonsu.sh"
 
-    if ($FSTABSYSTEMRW); then
-      check_zero_def "- Patching init.*.rc, fstabs(r/w), file_contexts, dm-verity" "LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --patch-rw /sutmp/ramdisk /sutmp/ramdisk $STOCKBOOTIMAGE"
-    else
-      check_zero_def "- Patching init.*.rc, fstabs, file_contexts, dm-verity" "LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --patch /sutmp/ramdisk /sutmp/ramdisk $STOCKBOOTIMAGE"
+    check_zero_def "- Creating mount point" "LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --cpio-mkdir /sutmp/ramdisk /sutmp/ramdisk 755 su"
+
+    check_zero_def "- Patching init.*.rc, fstabs, file_contexts, dm-verity" "LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --patch /sutmp/ramdisk /sutmp/ramdisk $STOCKBOOTIMAGE"
+
+    if [ -f "/data/custom_ramdisk_patch.sh" ]; then
+        check_zero_def "- Calling user ramdisk patch script" "sh /data/custom_ramdisk_patch.sh /sutmp/ramdisk"
     fi
 
     check_zero_def "- Compressing ramdisk" "LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --gzip /sutmp/ramdisk /sutmp/ramdisk.packed"
     check_zero_def "- Creating boot image" "LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --bootimg-replace-ramdisk $STOCKBOOTIMAGE /sutmp/ramdisk.packed /sutmp/boot.img"
 
-    if ($CONTINUE); then
-      if [ -f "/data/custom_boot_image_patch.sh" ]; then
-        ui_print "- Calling user script"
-        USER=$(sh /data/custom_boot_image_patch.sh /sutmp/boot.img)
-        if [ $? -ne 0 ]; then
-          ui_print "--- Failure, aborting"
-          CONTINUE=false
-        fi
-      fi
+    if [ -f "/data/custom_boot_image_patch.sh" ]; then
+        check_zero_def "- Calling user boot image patch script" "sh /data/custom_boot_image_patch.sh /sutmp/boot.img"
     fi
 
     if ($CONTINUE); then
-      DEV=$(echo $BOOTIMAGE | grep /dev/block/)
+      DEV=$(echo `resolve_link $BOOTIMAGE` | grep /dev/block/)
       if [ $? -eq 0 ]; then
         ui_print "- Flashing boot image"
         dd if=/dev/zero of=$BOOTIMAGE bs=4096
@@ -1187,6 +1262,7 @@ else
   fi
 
   umount /su
+  losetup -d $LOOPDEVICE
 
   ui_print " "
   ui_print "*************************"

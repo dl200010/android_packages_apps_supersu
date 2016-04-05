@@ -16,19 +16,7 @@ loopsetup() {
   done
 }
 
-remount_ro() {
-  TMP=$(cat /proc/self/mountinfo | grep "$1 rw")
-  if [ $? -eq 0 ]; then
-    mount -o ro,remount $1
-  fi
-}
-
 if [ ! -d "/su/bin" ]; then
-  # if we fstab'd system/vendor/oem to rw, remount them ro here
-  remount_ro /system
-  remount_ro /vendor
-  remount_ro /oem
-
   # not mounted yet, do our thing
   REBOOT=false
 
@@ -39,10 +27,12 @@ if [ ! -d "/su/bin" ]; then
   # only used if recovery couldn't mount /data
   if [ -f "/cache/su.img" ]; then
     log_print "/cache/su.img found"
-
+    e2fsck -p /cache/su.img
     OVERWRITE=true
 
     if [ -f "/data/su.img" ]; then
+      e2fsck -p /data/su.img
+
       # attempt merge, this will fail pre-M
       # will probably also fail with /system installed busybox,
       # but then again, is there anything busybox doesn't break?
@@ -92,6 +82,9 @@ if [ ! -d "/su/bin" ]; then
           umount /cache/cache_img
         fi
       fi
+
+      losetup -d $LOOPDATA
+      losetup -d $LOOPCACHE
 
       rmdir /cache/data_img
       rmdir /cache/cache_img
@@ -151,8 +144,19 @@ if [ ! -d "/su/bin" ]; then
   # trigger mount, also works pre-M
   chcon u:object_r:system_data_file:s0 /data/su.img
   chmod 0600 /data/su.img
+  e2fsck -p /data/su.img
   setprop sukernel.mount 1
   sleep 1
+
+  # sometimes the trigger doesn't work, fallback to losetup
+  # losetup in turn doesn't work pre-M
+  cat /proc/mounts | grep /su >/dev/null
+  if [ "$?" -ne "0" ]; then
+    loopsetup /data/su.img
+    if [ ! -z "$LOOPDEVICE" ]; then
+      mount -t ext4 -o rw,noatime $LOOPDEVICE /su
+    fi
+  fi
 
   # if other su binaries exist, route them to ours
   mount -o bind /su/bin/su /sbin/su

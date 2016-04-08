@@ -9,7 +9,7 @@ LOCAL_SRC_FILES := SuperSU/common/Superuser.apk
 LOCAL_PACKAGE_NAME := $(LOCAL_MODULE)
 LOCAL_MODULE_CLASS := APPS
 LOCAL_MODULE_SUFFIX := $(COMMON_ANDROID_PACKAGE_SUFFIX)
-LOCAL_REQUIRED_MODULES := su .su daemonsu libsupol.so supolicy .installed_su_daemon 99SuperSUDaemon
+LOCAL_REQUIRED_MODULES := su .su daemonsu libsupol.so supolicy .installed_su_daemon 99SuperSUDaemon install-rootfinish.sh
 include $(BUILD_PREBUILT)
 
 #File used to tell TWRP that root is installed
@@ -38,7 +38,7 @@ LOCAL_SRC_FILES := Busybox/busybox
 LOCAL_MODULE_TAGS := optional
 LOCAL_MODULE_CLASS := EXECUTABLES
 LOCAL_MODULE_PATH := $(PRODUCT_OUT)/system/xbin
-LOCAL_REQUIRED_MODULES := install-busybox.sh
+LOCAL_REQUIRED_MODULES := install-busybox.sh install-busyboxfinish.sh
 include $(BUILD_PREBUILT)
 
 #script called from init.rc to execute the /system/etc/init.d scripts
@@ -50,8 +50,25 @@ LOCAL_MODULE_CLASS := EXECUTABLES
 LOCAL_MODULE_PATH := $(PRODUCT_OUT)/system/etc
 include $(BUILD_PREBUILT)
 
+#symlink all applets
+include $(CLEAR_VARS)
+LOCAL_MODULE := install-busyboxfinish.sh
+LOCAL_SRC_FILES := Busybox/install-busyboxfinish.sh
+LOCAL_MODULE_TAGS := optional
+LOCAL_MODULE_CLASS := EXECUTABLES
+LOCAL_MODULE_PATH := $(PRODUCT_OUT)/system/bin
+include $(BUILD_PREBUILT)
+
 #arm64 files superuser access
 ifeq ($(TARGET_ARCH),arm64)
+
+include $(CLEAR_VARS)
+LOCAL_MODULE := install-rootfinish.sh
+LOCAL_SRC_FILES := SuperSU/ARCH/arm64/install-rootfinish.sh
+LOCAL_MODULE_CLASS := EXECUTABLES
+LOCAL_MODULE_TAGS := optional
+LOCAL_MODULE_PATH := $(PRODUCT_OUT)/system/bin
+include $(BUILD_PREBUILT)
 
 include $(CLEAR_VARS)
 LOCAL_MODULE := su

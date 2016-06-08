@@ -34,10 +34,12 @@
 # Overridable variables (shell):
 #   BIN - Location of architecture specific files (native folder)
 #   COM - Location of common files (APK folder)
+#   LESSLOGGING - Reduce ui_print logging (true/false)
 #   NOOVERRIDE - Do not read variables from /system/.supersu or
 #                /data/.supersu
 #
-# Overridable variables (shell, /system/.supersu, /data/.supersu):
+# Overridable variables (shell, /system/.supersu, /cache/.supersu,
+# /data/.supersu):
 #   SYSTEMLESS - Do a system-less install? (true/false, 6.0+ only)
 #   PATCHBOOTIMAGE - Automatically patch boot image? (true/false,
 #                    SYSTEMLESS only)
@@ -45,8 +47,13 @@
 #   STOCKBOOTIMAGE - Stock boot image location (PATCHBOOTIMAGE only)
 #   BINDSYSTEMXBIN - Poor man's overlay on /system/xbin (true/false,
 #                    SYSTEMLESS only)
-#   PERMISSIVE - Set sepolicy to fake-permissive (PATCHBOOTIMAGE only)
-# Shell overrides all, /data/.supersu overrides /system/.supersu
+#   PERMISSIVE - Set sepolicy to fake-permissive (true/false, PATCHBOOTIMAGE
+#                only)
+#   KEEPVERITY - Do not remove dm-verity (true/false, PATCHBOOTIMAGE only)
+#   KEEPFORCEENCRYPT - Do not replace forceencrypt with encryptable (true/
+#                      false, PATCHBOOTIMAGE only)
+# Shell overrides all, /data/.supersu overrides /cache/.supersu overrides
+# /system/.supersu
 #
 # Note that if SELinux is set to enforcing, the daemonsu binary expects
 # to be run at startup (usually from install-recovery.sh, 99SuperSUDaemon,
@@ -183,6 +190,7 @@
 # --- Changes forceencrypt/forcefdeorfbe into encryptable
 # --- Set ro mounts to use noatime
 # - Patches /init.rc
+# --- Removes 'setprop selinux.reload_policy' occurences
 # --- Adds a sukernel.mount property trigger that mounts /data/su.img to /su
 # --- Adds the daemonsu service that launches /sbin/launch_daemon.sh
 # --- Adds a SuperSU:PATCH marker with the version of the sukernel tool
@@ -220,7 +228,7 @@ ZIP=$3
 getvar() {
   local VARNAME=$1
   local VALUE=$(eval echo \$"$VARNAME");
-  for FILE in /data/.supersu /system/.supersu; do
+  for FILE in /data/.supersu /cache/.supersu /system/.supersu; do
     if [ -z "$VALUE" ]; then
       LINE=$(cat $FILE 2>/dev/null | grep "$VARNAME=")
       if [ ! -z "$LINE" ]; then
@@ -251,9 +259,28 @@ if [ "$?" -eq "0" ]; then
   done
 fi
 
-ui_print() {
+ui_print_always() {
   echo -n -e "ui_print $1\n" >> /proc/self/fd/$OUTFD
   echo -n -e "ui_print\n" >> /proc/self/fd/$OUTFD
+}
+
+if [ -z "$LESSLOGGING" ]; then
+  LESSLOGGING=false
+fi
+
+UI_PRINT_LAST=""
+
+ui_print() {
+  if (! $LESSLOGGING); then
+    UI_PRINT_LAST="$1"
+    ui_print_always "$1"
+  fi
+}
+
+ui_print_less() {
+  if ($LESSLOGGING); then
+    ui_print_always "$1"
+  fi
 }
 
 ch_con() {
@@ -546,7 +573,14 @@ check_zero() {
     if [ $? -eq 0 ]; then
       if [ ! -z "$2" ]; then ui_print "$2"; fi
     else
-      if [ ! -z "$3" ]; then ui_print "$3"; fi
+      if [ ! -z "$3" ]; then
+        if [ ! -z "$1" ]; then
+          ui_print_less "$1"
+        else
+          ui_print_less "$UI_PRINT_LAST"
+        fi
+        ui_print_always "$3";
+      fi
       CONTINUE=false
     fi
   fi
@@ -682,9 +716,9 @@ detect_systemless_required() {
 }
 
 ui_print " "
-ui_print "*****************"
-ui_print "SuperSU installer"
-ui_print "*****************"
+ui_print        "*****************"
+ui_print_always "SuperSU installer"
+ui_print        "*****************"
 
 ui_print "- Mounting /system, /data and rootfs"
 
@@ -711,6 +745,8 @@ if [ -z "$NOOVERRIDE" ]; then
   getvar STOCKBOOTIMAGE
   getvar BINDSYSTEMXBIN
   getvar PERMISSIVE
+  getvar KEEPVERITY
+  getvar KEEPFORCEENCRYPT
 fi
 if [ -z "$SYSTEMLESS" ]; then
   # detect if we need systemless, based on Android version and boot image
@@ -727,6 +763,14 @@ fi
 if [ -z "$PERMISSIVE" ]; then
   # don't make everything fake-permissive
   PERMISSIVE=false
+fi
+if [ -z "$KEEPVERITY" ]; then
+  # we don't keep dm-verity by default
+  KEEPVERITY=false
+fi
+if [ -z "$KEEPFORCEENCRYPT" ]; then
+  # we don't keep forceencrypt by default
+  KEEPFORCEENCRYPT=false
 fi
 
 API=$(cat /system/build.prop | grep "ro.build.version.sdk=" | dd bs=1 skip=21 count=2)
@@ -813,7 +857,7 @@ if [ -z "$BIN" ]; then
 fi
 
 # execute binaries from ramdisk
-chmod 0755 $BIN/*
+chmod -R 0755 $BIN/*
 RAMDISKLIB=$BIN:$SYSTEMLIB
 
 if [ "$API" -ge "19" ]; then
@@ -1143,16 +1187,17 @@ else
 
   if ($PATCHBOOTIMAGE); then
     ui_print " "
-    ui_print "******************"
-    ui_print "Boot image patcher"
-    ui_print "******************"
+    ui_print        "******************"
+    ui_print_always "Boot image patcher"
+    ui_print        "******************"
 
     ui_print "- Finding boot image"
     find_boot_image
 
     CONTINUE=true
     if [ -z "$BOOTIMAGE" ]; then
-      ui_print "--- Boot image: not found, aborting"
+      ui_print_less "$UI_PRINT_LAST"
+      ui_print_always "--- Boot image: not found, aborting"
       CONTINUE=false
     else
       ui_print "--- Boot image: $BOOTIMAGE"
@@ -1164,6 +1209,12 @@ else
 
     rm -rf /sutmp
     mkdir /sutmp
+
+    IMAGETYPE=android
+    LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --bootimg-type $BOOTIMAGE
+    if [ $? -eq 2 ]; then
+      IMAGETYPE=chromeos
+    fi
 
     check_zero_def "- Extracting ramdisk" "LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --bootimg-extract-ramdisk $BOOTIMAGE /sutmp/ramdisk.packed"
     check_zero_def "- Decompressing ramdisk" "LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --ungzip /sutmp/ramdisk.packed /sutmp/ramdisk"
@@ -1177,17 +1228,28 @@ else
         if ($CONTINUE); then
           LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --restore /sutmp/ramdisk /sutmp/stock_boot.img
           if [ $? -ne 0 ]; then
-            ui_print "--- Restore failed, aborting"
+            ui_print_always "--- Stock restore failed, attempting ramdisk restore"
             CONTINUE=false
           else
-            ui_print "--- Backup restored"
+            ui_print "--- Stock backup restored"
             STOCKBOOTIMAGE=/sutmp/stock_boot.img
           fi
         fi
 
         check_zero_def "- Extracting ramdisk" "LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --bootimg-extract-ramdisk /sutmp/stock_boot.img /sutmp/ramdisk.packed"
         check_zero_def "- Decompressing ramdisk" "LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --ungzip /sutmp/ramdisk.packed /sutmp/ramdisk"
-        check_zero "- Checking patch status" "" "--- Already patched, aborting" "LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --patch-test /sutmp/ramdisk"
+        check_zero "- Checking patch status" "" "--- Already patched, attempting ramdisk restore" "LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --patch-test /sutmp/ramdisk"
+
+        if (! $CONTINUE); then
+          LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --cpio-restore /sutmp/ramdisk /sutmp/ramdisk
+          if [ $? -ne 0 ]; then
+            ui_print_always "--- Ramdisk restore failed, aborting"
+          else
+            ui_print "--- Ramdisk backup restored (OTA impossible)"
+            CONTINUE=true
+          fi
+          check_zero "- Checking patch status" "" "--- Already patched, aborting" "LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --patch-test /sutmp/ramdisk"
+        fi
       else
         ui_print "- Creating backup"
         rm /data/stock_boot_*.img
@@ -1202,37 +1264,68 @@ else
     fi
 
     if ($CONTINUE); then
+      cp_perm 0 0 0644 /sutmp/ramdisk /sutmp/ramdisk.original
+
       ui_print "- Patching sepolicy"
 
       check_zero_def "" "LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --cpio-extract /sutmp/ramdisk sepolicy /sutmp/sepolicy"
 
       if ($CONTINUE); then
         if ($PERMISSIVE); then
-          LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/supolicy --file /sutmp/sepolicy /sutmp/sepolicy_patched "permissive *"
+          LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/supolicy --file /sutmp/sepolicy /sutmp/sepolicy.patched "permissive *"
         else
-          LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/supolicy --file /sutmp/sepolicy /sutmp/sepolicy_patched
+          LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/supolicy --file /sutmp/sepolicy /sutmp/sepolicy.patched
         fi
-        if [ ! -f "/sutmp/sepolicy_patched" ]; then
-          ui_print "--- Failure, aborting"
+        if [ ! -f "/sutmp/sepolicy.patched" ]; then
+          ui_print_less "$UI_PRINT_LAST"
+          ui_print_always "--- Failure, aborting"
           CONTINUE=false
         fi
       fi
 
-      check_zero_def "" "LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --cpio-add /sutmp/ramdisk /sutmp/ramdisk 644 sepolicy /sutmp/sepolicy_patched"
+      check_zero_def "" "LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --cpio-add /sutmp/ramdisk /sutmp/ramdisk 644 sepolicy /sutmp/sepolicy.patched"
     fi
 
     check_zero_def "- Adding daemon launcher" "LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --cpio-add /sutmp/ramdisk /sutmp/ramdisk 700 sbin/launch_daemonsu.sh $COM/launch_daemonsu.sh"
 
     check_zero_def "- Creating mount point" "LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --cpio-mkdir /sutmp/ramdisk /sutmp/ramdisk 755 su"
 
-    check_zero_def "- Patching init.*.rc, fstabs, file_contexts, dm-verity" "LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --patch /sutmp/ramdisk /sutmp/ramdisk $STOCKBOOTIMAGE"
+    COMMAND="LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --patch /sutmp/ramdisk /sutmp/ramdisk $STOCKBOOTIMAGE"
+    if ($KEEPVERITY); then
+      COMMAND="$COMMAND --keep-verity"
+    fi
+    if ($KEEPFORCEENCRYPT); then
+      COMMAND="$COMMAND --keep-forceencrypt"
+    fi
+    check_zero_def "- Patching init.*.rc, fstabs, file_contexts, dm-verity" "$COMMAND"
 
     if [ -f "/data/custom_ramdisk_patch.sh" ]; then
         check_zero_def "- Calling user ramdisk patch script" "sh /data/custom_ramdisk_patch.sh /sutmp/ramdisk"
     fi
 
+    check_zero_def "- Creating ramdisk backup" "LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --cpio-backup /sutmp/ramdisk.original /sutmp/ramdisk /sutmp/ramdisk"
+
     check_zero_def "- Compressing ramdisk" "LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --gzip /sutmp/ramdisk /sutmp/ramdisk.packed"
+
+    if [ "$IMAGETYPE" = "chromeos" ]; then
+      $BIN/chromeos/futility vbutil_kernel --get-vmlinuz $STOCKBOOTIMAGE --vmlinuz-out /sutmp/boot.chromeos.img
+      STOCKBOOTIMAGE=/sutmp/boot.chromeos.img
+    fi
+
     check_zero_def "- Creating boot image" "LD_LIBRARY_PATH=$SYSTEMLIB /su/bin/sukernel --bootimg-replace-ramdisk $STOCKBOOTIMAGE /sutmp/ramdisk.packed /sutmp/boot.img"
+
+    if [ "$IMAGETYPE" = "chromeos" ]; then
+      ui_print "- Signing boot image"
+      $BIN/chromeos/futility vbutil_kernel --pack /sutmp/boot.img.signed --keyblock $COM/chromeos/kernel.keyblock --signprivate $COM/chromeos/kernel_data_key.vbprivk --version 1 --vmlinuz /sutmp/boot.img --config $COM/chromeos/kernel.config --arch arm --bootloader $COM/chromeos/kernel.bootloader --flags 0x1
+      if [ -f "/sutmp/boot.img.signed" ]; then
+        rm -rf /sutmp/boot.img
+        mv /sutmp/boot.img.signed /sutmp/boot.img
+      else
+        ui_print_less "$UI_PRINT_LAST"
+        ui_print_always "--- Failure, aborting"
+        $CONTINUE=false
+      fi
+    fi
 
     if [ -f "/data/custom_boot_image_patch.sh" ]; then
         check_zero_def "- Calling user boot image patch script" "sh /data/custom_boot_image_patch.sh /sutmp/boot.img"
@@ -1268,20 +1361,28 @@ else
   ui_print "*************************"
   ui_print "    IMPORTANT NOTICES    "
   ui_print "*************************"
-  ui_print "If TWRP offers to install"
-  ui_print "SuperSU, do *NOT* let it!"
-  ui_print "*************************"
+
+  TWRP2=$(cat /tmp/recovery.log | grep "ro.twrp.version=2");
+  if [ $? -eq 0 ]; then
+    ui_print "If TWRP offers to install"
+    ui_print "SuperSU, do *NOT* let it!"
+    ui_print "*************************"
+  fi
+
   ui_print "First reboot may take a  "
   ui_print "few minutes. It can also "
   ui_print "loop a few times. Do not "
   ui_print "interrupt the process!   "
   ui_print "*************************"
   ui_print " "
-  sleep 5
+
+  if (! $LESSLOGGING); then
+    sleep 5
+  fi
 fi
 
 ui_print "- Unmounting /system"
 umount /system
 
-ui_print "- Done !"
+ui_print_always "- Done !"
 exit 0

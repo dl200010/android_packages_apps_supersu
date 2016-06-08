@@ -19,7 +19,7 @@ ui_print "*********************"
 ui_print "- Mounting /system"
 mount /system
 
-ui_print "- Installing BusyBox v1.24.1-Stericson"
+ui_print "- Installing BusyBox v1.24.2-Stericson"
 unzip -o "$3" busybox -d /system/xbin
 
 ui_print "- Setting BB permissions - root,shell,0755"

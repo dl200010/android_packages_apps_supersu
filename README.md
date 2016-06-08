@@ -32,7 +32,7 @@ If you like this, than please buy SuperSU Pro and BusyBox Pro! I did.
 
 
 
-SuperSU Free by Chainfire (2.71)
+SuperSU Free by Chainfire (2.74)
 #------------------------------------------------------------------#
 XDA Profile
 http://forum.xda-developers.com/member.php?u=631273
@@ -51,7 +51,7 @@ Latest: http://download.chainfire.eu/supersu
 #------------------------------------------------------------------#
 
 
-Busybox compiled by Stericson (1.24.1)
+Busybox compiled by Stericson (1.24.2)
 #------------------------------------------------------------------#
 XDA Profile
 http://forum.xda-developers.com/member.php?u=1335872
